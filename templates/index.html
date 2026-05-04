@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Industrial IoT | Smart Asset Supervision</title>
+    <!-- CSS Dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        :root { --sidebar-width: 260px; --primary-industrial: #2c3e50; --accent-safety: #e67e22; }
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow-x: hidden; }
+        
+        /* Sidebar Navigation */
+        #sidebar { width: var(--sidebar-width); height: 100vh; position: fixed; background: var(--primary-industrial); color: white; transition: all 0.3s; z-index: 1000; }
+        #sidebar .nav-link { color: rgba(255,255,255,0.7); padding: 15px 25px; border-radius: 0; border-left: 4px solid transparent; cursor: pointer; }
+        #sidebar .nav-link:hover, #sidebar .nav-link.active { background: rgba(255,255,255,0.1); color: white; border-left-color: var(--accent-safety); }
+        
+        /* Main Content */
+        #content { margin-left: var(--sidebar-width); padding: 30px; transition: all 0.3s; }
+        .stat-card { border: none; border-radius: 12px; transition: transform 0.2s; border-bottom: 4px solid transparent; }
+        .stat-card:hover { transform: translateY(-5px); }
+        .card-auth { border-bottom-color: #2ecc71; }
+        .card-alert { border-bottom-color: #e74c3c; }
+        .card-device { border-bottom-color: #3498db; }
+        
+        /* Security Overlay */
+        .alarm-active { animation: industrial-flash 1.5s infinite; }
+        @keyframes industrial-flash {
+            0% { background: #fff; }
+            50% { background: #fdeaea; box-shadow: 0 0 20px rgba(231, 76, 60, 0.4); }
+            100% { background: #fff; }
+        }
+        
+        .badge-industrial { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+        .table-professional { background: white; border-radius: 12px; overflow: hidden; }
+        
+        /* Section Visibility */
+        .dashboard-section { display: none; }
+        .dashboard-section.active { display: block; }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <nav id="sidebar">
+        <div class="p-4 text-center border-bottom border-secondary mb-3">
+            <h4 class="fw-bold"><i class="fas fa-microchip me-2"></i>IoT TRACKER</h4>
+            <small class="text-secondary">Industrial Supervision v2.0</small>
+        </div>
+        <div class="nav flex-column">
+            <a onclick="showSection('overview')" class="nav-link active" id="nav-overview"><i class="fas fa-chart-line me-3"></i>Overview</a>
+            <a onclick="showSection('inventory')" class="nav-link" id="nav-inventory"><i class="fas fa-boxes me-3"></i>Inventory Control</a>
+            <a onclick="showSection('personnel')" class="nav-link" id="nav-personnel"><i class="fas fa-users-cog me-3"></i>Personnel</a>
+            <a onclick="showSection('security')" class="nav-link" id="nav-security"><i class="fas fa-shield-alt me-3"></i>Security Logs</a>
+            <a onclick="showSection('settings')" class="nav-link mt-auto" id="nav-settings"><i class="fas fa-cog me-3"></i>System Settings</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="content">
+        
+        <!-- SECTION: OVERVIEW -->
+        <div id="section-overview" class="dashboard-section active">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="fw-bold text-dark">System Monitoring</h2>
+                <div>
+                    <span class="badge bg-success me-2"><i class="fas fa-circle me-1"></i> MQTT Online</span>
+                    <span class="systemTime text-muted small"></span>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <div class="card stat-card card-auth p-3 shadow-sm">
+                        <div class="d-flex justify-content-between">
+                            <div><p class="text-muted mb-0">Total Assets</p><h3 class="fw-bold mb-0">{{ assets|length }}</h3></div>
+                            <i class="fas fa-tools fa-2x text-success opacity-50"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card stat-card card-alert p-3 shadow-sm" id="alertCounterCard">
+                        <div class="d-flex justify-content-between">
+                            <div><p class="text-muted mb-0">Active Alerts</p><h3 class="fw-bold mb-0 alertCounterDisplay">0</h3></div>
+                            <i class="fas fa-exclamation-triangle fa-2x text-danger opacity-50"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card stat-card card-device p-3 shadow-sm">
+                        <div class="d-flex justify-content-between">
+                            <div><p class="text-muted mb-0">System Status</p><h3 class="fw-bold mb-0">Active</h3></div>
+                            <i class="fas fa-wifi fa-2x text-primary opacity-50"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-lg-8 mb-4">
+                    <div class="card shadow-sm border-0 table-professional p-3">
+                        <h5 class="fw-bold text-primary mb-3">Live Supervision Feed</h5>
+                        <div id="logFeed" class="list-group list-group-flush" style="max-height: 400px; overflow-y: auto;">
+                            {% for log in logs %}
+                            <div class="list-group-item d-flex justify-content-between align-items-center">
+                                <div><span class="badge {% if log.event_type == 'SECURITY' %}bg-danger{% else %}bg-secondary{% endif %} me-2">{{ log.event_type }}</span> {{ log.message }}</div>
+                                <small class="text-muted">{{ log.timestamp }}</small>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4 mb-4">
+                    <div class="card shadow-sm border-0 p-3">
+                        <h5 class="fw-bold mb-3">Event Telemetry</h5>
+                        <canvas id="telemetryChart"></canvas>
+                        <hr>
+                        <div class="d-grid gap-2">
+                            <button onclick="disarmSystem()" class="btn btn-dark btn-sm"><i class="fas fa-lock-open me-2"></i>Acknowledge & Disarm</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION: INVENTORY -->
+        <div id="section-inventory" class="dashboard-section">
+            <h2 class="fw-bold text-dark mb-4">Asset Inventory Control</h2>
+            <div class="card shadow-sm border-0 table-professional">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr><th>Asset Name</th><th>Category</th><th>Serial Number</th><th>Health</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for asset in assets %}
+                            <tr>
+                                <td><strong>{{ asset.name }}</strong></td>
+                                <td>{{ asset.category }}</td>
+                                <td><code>{{ asset.serial_number }}</code></td>
+                                <td>
+                                    <div class="progress" style="height: 5px; width: 100px;">
+                                        <div class="progress-bar bg-success" style="width: {{ asset.health_score }}%"></div>
+                                    </div>
+                                </td>
+                                <td><span class="badge bg-success-subtle text-success border border-success-subtle">{{ asset.status }}</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION: PERSONNEL -->
+        <div id="section-personnel" class="dashboard-section">
+            <h2 class="fw-bold text-dark mb-4">Personnel & Authorization</h2>
+            <div class="row">
+                {% for user in users %}
+                <div class="col-md-4 mb-3">
+                    <div class="card shadow-sm border-0 p-3">
+                        <div class="d-flex align-items-center">
+                            <div class="bg-primary-subtle p-3 rounded-circle me-3"><i class="fas fa-user text-primary"></i></div>
+                            <div>
+                                <h6 class="fw-bold mb-0">{{ user.name }}</h6>
+                                <small class="text-muted">{{ user.role }}</small><br>
+                                <small class="badge bg-light text-dark">{{ user.department }}</small>
+                            </div>
+                        </div>
+                        <hr>
+                        <code>RFID: {{ user.rfid_uid }}</code>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- SECTION: SECURITY LOGS -->
+        <div id="section-security" class="dashboard-section">
+            <h2 class="fw-bold text-dark mb-4">Full Security Audit Logs</h2>
+            <div class="card shadow-sm border-0 p-3">
+                <table class="table table-sm">
+                    <thead><tr><th>Timestamp</th><th>Type</th><th>Severity</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td><small>{{ log.timestamp }}</small></td>
+                            <td><span class="badge bg-dark">{{ log.event_type }}</span></td>
+                            <td><span class="text-{% if log.severity == 'ALERT' %}danger{% else %}info{% endif %}">{{ log.severity }}</span></td>
+                            <td>{{ log.message }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- SECTION: SETTINGS -->
+        <div id="section-settings" class="dashboard-section">
+            <h2 class="fw-bold text-dark mb-4">System Settings</h2>
+            <div class="card shadow-sm border-0 p-4">
+                <h5><i class="fas fa-server me-2"></i>MQTT Broker Configuration</h5>
+                <p class="text-muted">Host: <code>broker.hivemq.com</code> | Port: 1883</p>
+                <hr>
+                <h5><i class="fas fa-database me-2"></i>Database Maintenance</h5>
+                <button class="btn btn-outline-danger btn-sm">Backup SQLite Database</button>
+                <button class="btn btn-outline-secondary btn-sm ms-2">Purge Old Logs</button>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        const socket = io();
+        let alertCount = 0;
+
+        // Navigation Logic
+        function showSection(sectionId) {
+            // Hide all sections
+            document.querySelectorAll('.dashboard-section').forEach(s => s.classList.remove('active'));
+            // Remove active class from nav
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            
+            // Show selected section
+            document.getElementById('section-' + sectionId).classList.add('active');
+            document.getElementById('nav-' + sectionId).classList.add('active');
+        }
+
+        // Initialize Telemetry Chart
+        const ctx = document.getElementById('telemetryChart').getContext('2d');
+        const telemetryChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Security Events',
+                    data: [],
+                    borderColor: '#e67e22',
+                    tension: 0.4,
+                    fill: true,
+                    backgroundColor: 'rgba(230, 126, 34, 0.1)'
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } } }
+        });
+
+        socket.on('new_log', function(data) {
+            const feed = document.getElementById('logFeed');
+            const item = document.createElement('div');
+            item.className = `list-group-item d-flex justify-content-between align-items-center list-group-item-${data.type}`;
+            item.innerHTML = `<div><span class="badge bg-primary me-2">EVENT</span> ${data.msg}</div><small>Now</small>`;
+            feed.prepend(item);
+            
+            // Update Chart
+            const now = new Date().toLocaleTimeString();
+            telemetryChart.data.labels.push(now);
+            telemetryChart.data.datasets[0].data.push(Math.floor(Math.random() * 10));
+            if(telemetryChart.data.labels.length > 10) telemetryChart.data.labels.shift();
+            telemetryChart.update();
+        });
+
+        socket.on('security_alert', function(data) {
+            alertCount++;
+            document.querySelectorAll('.alertCounterDisplay').forEach(el => el.innerText = alertCount);
+            document.getElementById('alertCounterCard').classList.add('alarm-active');
+            
+            const feed = document.getElementById('logFeed');
+            const item = document.createElement('div');
+            item.className = "list-group-item d-flex justify-content-between align-items-center bg-danger-subtle";
+            item.innerHTML = `<div><span class="badge bg-danger me-2">ALERT</span> ${data.msg}</div><small>URGENT</small>`;
+            feed.prepend(item);
+        });
+
+        socket.on('system_status', function(data) {
+            if(data.status === 'Disarmed') {
+                document.getElementById('alertCounterCard').classList.remove('alarm-active');
+            }
+        });
+
+        function disarmSystem() {
+            socket.emit('disarm_system');
+        }
+
+        // Live Clock
+        setInterval(() => {
+            document.querySelectorAll('.systemTime').forEach(el => el.innerText = new Date().toLocaleString());
+        }, 1000);
+    </script>
+</body>
+</html>
